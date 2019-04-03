@@ -24,15 +24,23 @@ def display_image(image):
 	plt.imshow(np.dstack((red, green, blue)))
 	plt.show()
 
-def display_W(W):
-	plt.figure()
-	for i in range(W.shape[0]):
-		plt.subplot(2, W.shape[0], i + 1)
-		red = np.reshape(W[i,0:1024],(32,32))
-		green = np.reshape(W[i,1024:2048],(32,32))
-		blue =  np.reshape(W[i,2048:3072],(32,32))
-		plt.imshow(np.dstack((red, green, blue)),  interpolation='nearest')
-	plt.show()
+def plot_weights(W, labels, file_name):
+	for i, row in enumerate(W):
+		img = (row - row.min()) / (row.max() - row.min())
+		plt.subplot(2, 5, i+1)
+		resize_image = np.reshape(img, (32, 32, 3), order='F')
+		rot_imag = np.rot90(resize_image, k=3)
+		plt.imshow(rot_imag, interpolation="gaussian")
+		plt.axis('off')
+		plt.title(labels[i].decode("utf-8"))
+	plt.savefig('Result_Pics/' + file_name) # save the figure to file
+	plt.close() 
+
+def plot_histogram(W, file_name):
+	histogram = W.flatten()
+	n, bins, patches = plt.hist(histogram, bins='auto', color='b', alpha=0.7, rwidth=0.85)
+	plt.savefig('Result_Pics/' + file_name) # save the figure to file
+	plt.close() 
 
 def EvaluateClassifier(X,W,b):
 	s = W @ X.T + b 
@@ -44,7 +52,7 @@ def soft_max(s):
 
 def ComputeCost(X,Y,W,b,lam):
 	l2 = lam * np.sum(W**2)
-	l_cross = Y.T * EvaluateClassifier(X,W,b)
+	l_cross = (Y.T * EvaluateClassifier(X,W,b)).sum(axis=0)
 	l_cross[l_cross == 0] = np.finfo(float).eps
 	return np.sum(-np.log(l_cross))/X.shape[0] + l2
 
@@ -106,40 +114,100 @@ def fit(traning, validation, batch_size=100, eta=0.1, n_epocs=20, lam=0.5):
 		history[epoc][3] = ComputeAccuracy(validation["input"],validation["labels"],W,b)
 	return W, b, history
 
-def plot(series):
-	for serie in series:
+def plot(series, file_name, ylabel=""):
+	l = ["Train", "Validation"]
+	for i,serie in enumerate(series):
 		x = list(range(1,serie.shape[0] +1))
-		plt.plot(x, serie)
-	plt.show()
+		plt.plot(x, serie, label=l[i])
+		plt.legend(loc='upper right')
+	plt.xlabel("epoc")
+	plt.ylabel(ylabel)
+	plt.savefig('Result_Pics/' + file_name) # save the figure to file
+	plt.close() 
+
+def get_lables(file):
+	with open(file, 'rb') as f:
+		meta = pickle.load(f, encoding='bytes')
+	return meta[b'label_names']
+	
+
+def experiment0():
+	traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
+	validation = read_images("Datasets/cifar-10-batches-py/data_batch_2")
+	test = read_images("Datasets/cifar-10-batches-py/test_batch")
+	lables = get_lables("Datasets/cifar-10-batches-py/batches.meta")
+	W, b, history = fit(traning, validation, batch_size=100, eta=0.01, n_epocs=20, lam=0)
+	plot([history[:,0], history[:,1]], "CostExperiment0.png", ylabel="Cost")
+	plot([history[:,2], history[:,3]], "AccuracyExperiment0.png", ylabel="Accuracy")
+	plot_weights(W, lables,"WeightsExperiment0.png")
+	plot_histogram(W, "WeightsHistogramExperiment0.png")
+	print("Experiment 0 batch_size=100, eta=0.01, n_epocs=20, lam=0")
+	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, 0))
+	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, 0))
+	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, 0))  
 
 def experiment1():
 	traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
 	validation = read_images("Datasets/cifar-10-batches-py/data_batch_2")
 	test = read_images("Datasets/cifar-10-batches-py/test_batch")
+	lables = get_lables("Datasets/cifar-10-batches-py/batches.meta")
 	W, b, history = fit(traning, validation, batch_size=100, eta=0.1, n_epocs=40, lam=0)
-	plot([history[:,0], history[:,1]])
-	plot([history[:,2], history[:,3]])
-	display_W(W)
-	print(ComputeAccuracy(test["input"],test["labels"],W,b)) 
+	plot([history[:,0], history[:,1]], "CostExperiment1.png", ylabel="Cost")
+	plot([history[:,2], history[:,3]], "AccuracyExperiment1.png", ylabel="Accuracy")
+	plot_weights(W, lables,"WeightsExperiment1.png")
+	plot_histogram(W, "WeightsHistogramExperiment1.png")
+	print("Experiment 1 batch_size=100, eta=0.1, n_epocs=40, lam=0")
+	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, 0))
+	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, 0))
+	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, 0))  
 
 def experiment2():
 	traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
 	validation = read_images("Datasets/cifar-10-batches-py/data_batch_2")
 	test = read_images("Datasets/cifar-10-batches-py/test_batch")
+	lables = get_lables("Datasets/cifar-10-batches-py/batches.meta")
 	W, b, history = fit(traning, validation, batch_size=100, eta=0.01, n_epocs=40, lam=0)
-	plot([history[:,0], history[:,1]])
-	plot([history[:,2], history[:,3]])
-	display_W(W)
-	print(ComputeAccuracy(test["input"],test["labels"],W,b)) 
+	plot([history[:,0], history[:,1]], "CostExperiment2.png", ylabel="Cost")
+	plot([history[:,2], history[:,3]], "AccuracyExperiment2.png", ylabel="Accuracy")
+	plot_weights(W, lables,"WeightsExperiment2.png")
+	plot_histogram(W, "WeightsHistogramExperiment2.png")	
+	print("Experiment 2 batch_size=100, eta=0.01, n_epocs=40, lam=0")
+	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, 0))
+	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, 0))
+	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, 0))  
 
 def experiment3():
 	traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
 	validation = read_images("Datasets/cifar-10-batches-py/data_batch_2")
 	test = read_images("Datasets/cifar-10-batches-py/test_batch")
-	W, b, history = fit(traning, validation, batch_size=100, eta=0.01, n_epocs=40, lam=0)
-	plot([history[:,0], history[:,1]])
-	plot([history[:,2], history[:,3]])
-	display_W(W)
-	print(ComputeAccuracy(test["input"],test["labels"],W,b)) 
+	lables = get_lables("Datasets/cifar-10-batches-py/batches.meta")
+	W, b, history = fit(traning, validation, batch_size=100, eta=0.01, n_epocs=40, lam=0.1)
+	plot([history[:,0], history[:,1]], "CostExperiment3.png", ylabel="Cost")
+	plot([history[:,2], history[:,3]], "AccuracyExperiment3.png", ylabel="Accuracy")
+	plot_weights(W, lables,"WeightsExperiment3.png")
+	plot_histogram(W, "WeightsHistogramExperiment3.png")
+	print("Experiment 3 batch_size=100, eta=0.01, n_epocs=40, lam=0.1")
+	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, 0.1))
+	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, 0.1))
+	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, 0.1))    
 
+def experiment4():
+	traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
+	validation = read_images("Datasets/cifar-10-batches-py/data_batch_2")
+	test = read_images("Datasets/cifar-10-batches-py/test_batch")
+	lables = get_lables("Datasets/cifar-10-batches-py/batches.meta")
+	W, b, history = fit(traning, validation, batch_size=100, eta=0.01, n_epocs=40, lam=1)
+	plot([history[:,0], history[:,1]], "CostExperiment4.png", ylabel="Cost")
+	plot([history[:,2], history[:,3]], "AccuracyExperiment4.png", ylabel="Accuracy")
+	plot_weights(W, lables,"WeightsExperiment4.png")
+	plot_histogram(W, "WeightsHistogramExperiment4.png")
+	print("Experiment 4 batch_size=100, eta=0.01, n_epocs=40, lam=1")
+	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, 1))
+	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, 1))
+	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, 1))   
+
+experiment0()
+experiment1()
 experiment2()
+experiment3()
+experiment4()
