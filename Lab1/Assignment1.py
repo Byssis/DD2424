@@ -3,10 +3,6 @@ import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-# Use batch 1 for traning 
-# Use batch 2 for validation
-# Use test for test
-
 def read_images(file):
 	with open(file, 'rb') as f:
 		dict = pickle.load(f, encoding='bytes')
@@ -14,13 +10,36 @@ def read_images(file):
 	y = dict[b'labels']
 	Y = np.eye(10)[y]
 	X.reshape((10000,3072))
-	return { "input":X/255, "targets":Y, "labels": y}
+	return { "input":X/255, "targets":Y, "labels": np.array(y)}
+
+def read_all():
+	path = "Datasets/cifar-10-batches-py/data_batch_"
+	N = 5
+	batches = []
+	data = read_images("Datasets/cifar-10-batches-py/data_batch_1")
+	for i in range(2, N + 1):
+		with open(path + str(i), 'rb') as f:
+			dict = pickle.load(f, encoding='bytes')
+			X = dict[b'data']
+			y = dict[b'labels']
+			Y = np.eye(10)[y]
+			X.reshape((10000,3072))
+			data["input"] = np.concatenate((data["input"], X/255), axis=0)
+			data["targets"] = np.concatenate((data["targets"], Y), axis=0)
+			data["labels"] = np.concatenate((data["labels"], np.array(y)), axis=0)
+	indicies = list(range(data["input"].shape[0]))
+	np.random.shuffle(indicies)
+	data["input"] = data["input"][indicies]
+	data["targets"] = data["targets"][indicies]
+	data["labels"] = data["labels"][indicies]
+	return data
+
+
 
 def display_image(image):
 	red = np.reshape(image[0:1024],(32,32))
 	green = np.reshape(image[1024:2048],(32,32))
 	blue =  np.reshape(image[2048:3072],(32,32))
-
 	plt.imshow(np.dstack((red, green, blue)))
 	plt.show()
 
@@ -93,12 +112,18 @@ def compute_gradients_num(X,Y,P,W,b,lam):
 			W[i,j] -= h
 	return grad_W, grad_b
 
-def fit(traning, validation, batch_size=100, eta=0.1, n_epocs=20, lam=0.5):
+def fit(traning, validation, batch_size=100, eta=0.1, n_epocs=20, lam=0.5, shuffle=False):
+	N = traning["input"].shape[0]
 	W = np.random.normal(0, 0.1, (10,3072))
 	b = np.random.normal(0, 0.1, (10,1)) 
-	N = traning["input"].shape[0]
 	history = np.zeros((n_epocs,4))
 	for epoc in tqdm(range(n_epocs)):
+		if shuffle:
+			indicies = list(range(N))
+			np.random.shuffle(indicies)
+			traning["input"] = traning["input"][indicies]
+			traning["targets"] = traning["targets"][indicies]
+			traning["labels"] = traning["labels"][indicies]
 		for i in range(int(N/batch_size)):
 			start = batch_size*i
 			end = batch_size*(i+1)
@@ -112,6 +137,8 @@ def fit(traning, validation, batch_size=100, eta=0.1, n_epocs=20, lam=0.5):
 		history[epoc][1] = ComputeCost(validation["input"],validation["targets"],W,b,lam)
 		history[epoc][2] = ComputeAccuracy(traning["input"],traning["labels"],W,b)
 		history[epoc][3] = ComputeAccuracy(validation["input"],validation["labels"],W,b)
+		#if epoc % 4 == 0:
+		#	eta /= 10 
 	return W, b, history
 
 def plot(series, file_name, ylabel=""):
@@ -130,84 +157,44 @@ def get_lables(file):
 		meta = pickle.load(f, encoding='bytes')
 	return meta[b'label_names']
 	
-
-def experiment0():
+def experiment(name="",batch_size=100, eta=0.01, n_epocs=20, lam=0, shuffle=False, plot_graphs=False):
 	traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
 	validation = read_images("Datasets/cifar-10-batches-py/data_batch_2")
 	test = read_images("Datasets/cifar-10-batches-py/test_batch")
 	lables = get_lables("Datasets/cifar-10-batches-py/batches.meta")
-	W, b, history = fit(traning, validation, batch_size=100, eta=0.01, n_epocs=20, lam=0)
-	plot([history[:,0], history[:,1]], "CostExperiment0.png", ylabel="Cost")
-	plot([history[:,2], history[:,3]], "AccuracyExperiment0.png", ylabel="Accuracy")
-	plot_weights(W, lables,"WeightsExperiment0.png")
-	plot_histogram(W, "WeightsHistogramExperiment0.png")
-	print("Experiment 0 batch_size=100, eta=0.01, n_epocs=20, lam=0")
-	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, 0))
-	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, 0))
-	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, 0))  
+	W, b, history = fit(traning, validation, batch_size=batch_size, eta=eta, n_epocs=n_epocs, lam=lam, shuffle=shuffle)
+	if plot_graphs:
+		plot([history[:,0], history[:,1]], "Cost" + name + ".png", ylabel="Cost")
+		plot([history[:,2], history[:,3]], "Accuracy" + name + ".png", ylabel="Accuracy")
+		plot_weights(W, lables,"Weights" + name + ".png")
+		plot_histogram(W, "WeightsHistogram" + name + ".png")
+	print("{} batch_size={}, eta={}, n_epocs={}, lam={}, shuffle={}".format(name, batch_size, eta, n_epocs,lam, shuffle))
+	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, lam))
+	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, lam))
+	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, lam)) 
 
-def experiment1():
-	traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
-	validation = read_images("Datasets/cifar-10-batches-py/data_batch_2")
+def experiment_alldata(name="",batch_size=100, eta=0.01, n_epocs=20, lam=0, shuffle=False, plot_graphs=False):
+	data = read_all()
+	traning = {}
+	validation = {}
+	traning["input"] = data["input"][1000:]
+	traning["targets"] = data["targets"][1000:]
+	traning["labels"] = data["labels"][1000:]
+	validation["input"] = data["input"][:1000]
+	validation["targets"] = data["targets"][:1000]
+	validation["labels"] = data["labels"][:1000]	
 	test = read_images("Datasets/cifar-10-batches-py/test_batch")
 	lables = get_lables("Datasets/cifar-10-batches-py/batches.meta")
-	W, b, history = fit(traning, validation, batch_size=100, eta=0.1, n_epocs=40, lam=0)
-	plot([history[:,0], history[:,1]], "CostExperiment1.png", ylabel="Cost")
-	plot([history[:,2], history[:,3]], "AccuracyExperiment1.png", ylabel="Accuracy")
-	plot_weights(W, lables,"WeightsExperiment1.png")
-	plot_histogram(W, "WeightsHistogramExperiment1.png")
-	print("Experiment 1 batch_size=100, eta=0.1, n_epocs=40, lam=0")
-	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, 0))
-	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, 0))
-	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, 0))  
+	W, b, history = fit(traning, validation, batch_size=batch_size, eta=eta, n_epocs=n_epocs, lam=lam, shuffle=shuffle)
+	if plot_graphs:
+		plot([history[:,0], history[:,1]], "Cost" + name + ".png", ylabel="Cost")
+		plot([history[:,2], history[:,3]], "Accuracy" + name + ".png", ylabel="Accuracy")
+		plot_weights(W, lables,"Weights" + name + ".png")
+		plot_histogram(W, "WeightsHistogram" + name + ".png")
+	print("{} batch_size={}, eta={}, n_epocs={}, lam={}, shuffle={}".format(name, batch_size, eta, n_epocs,lam, shuffle))
+	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, lam))
+	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, lam))
+	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, lam)) 
 
-def experiment2():
-	traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
-	validation = read_images("Datasets/cifar-10-batches-py/data_batch_2")
-	test = read_images("Datasets/cifar-10-batches-py/test_batch")
-	lables = get_lables("Datasets/cifar-10-batches-py/batches.meta")
-	W, b, history = fit(traning, validation, batch_size=100, eta=0.01, n_epocs=40, lam=0)
-	plot([history[:,0], history[:,1]], "CostExperiment2.png", ylabel="Cost")
-	plot([history[:,2], history[:,3]], "AccuracyExperiment2.png", ylabel="Accuracy")
-	plot_weights(W, lables,"WeightsExperiment2.png")
-	plot_histogram(W, "WeightsHistogramExperiment2.png")	
-	print("Experiment 2 batch_size=100, eta=0.01, n_epocs=40, lam=0")
-	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, 0))
-	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, 0))
-	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, 0))  
-
-def experiment3():
-	traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
-	validation = read_images("Datasets/cifar-10-batches-py/data_batch_2")
-	test = read_images("Datasets/cifar-10-batches-py/test_batch")
-	lables = get_lables("Datasets/cifar-10-batches-py/batches.meta")
-	W, b, history = fit(traning, validation, batch_size=100, eta=0.01, n_epocs=40, lam=0.1)
-	plot([history[:,0], history[:,1]], "CostExperiment3.png", ylabel="Cost")
-	plot([history[:,2], history[:,3]], "AccuracyExperiment3.png", ylabel="Accuracy")
-	plot_weights(W, lables,"WeightsExperiment3.png")
-	plot_histogram(W, "WeightsHistogramExperiment3.png")
-	print("Experiment 3 batch_size=100, eta=0.01, n_epocs=40, lam=0.1")
-	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, 0.1))
-	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, 0.1))
-	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, 0.1))    
-
-def experiment4():
-	traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
-	validation = read_images("Datasets/cifar-10-batches-py/data_batch_2")
-	test = read_images("Datasets/cifar-10-batches-py/test_batch")
-	lables = get_lables("Datasets/cifar-10-batches-py/batches.meta")
-	W, b, history = fit(traning, validation, batch_size=100, eta=0.01, n_epocs=40, lam=1)
-	plot([history[:,0], history[:,1]], "CostExperiment4.png", ylabel="Cost")
-	plot([history[:,2], history[:,3]], "AccuracyExperiment4.png", ylabel="Accuracy")
-	plot_weights(W, lables,"WeightsExperiment4.png")
-	plot_histogram(W, "WeightsHistogramExperiment4.png")
-	print("Experiment 4 batch_size=100, eta=0.01, n_epocs=40, lam=1")
-	print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, 1))
-	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, 1))
-	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, 1))   
-
-experiment0()
-experiment1()
-experiment2()
-experiment3()
-experiment4()
+experiment_alldata(name="M", batch_size=100, n_epocs=20, eta=0.01)
+#experiment(name="TestShuffle", batch_size=100, n_epocs=40, eta=1, lam=0.1)
