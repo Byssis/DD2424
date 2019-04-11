@@ -66,7 +66,7 @@ def EvaluateClassifier(X,W,b):
 	return soft_max(s)
 
 def soft_max(s):
-	s_exp = np.exp(s)
+	s_exp = np.exp(s - np.max(s))
 	return s_exp / np.sum(s_exp, axis=0)
 
 def ComputeCost(X,Y,W,b,lam):
@@ -79,16 +79,13 @@ def ComputeAccuracy(X,y,W,b):
 	return np.sum(np.argmax(EvaluateClassifier(X,W,b), axis=0) == y) / X.shape[0]
 
 def ComputeGradients(X,Y,P,W,b,lam):
+	N = X.shape[0] 
 	gradW = np.zeros_like(W)
-	gradB = np.zeros_like(b)
-	for i in range(X.shape[0]):
-		x = np.reshape(X[i], (3072,1))
-		y = np.reshape(Y[i], (10,1))
-		p = np.reshape(P[:,i], (10,1))
-		g = -(y-p)	
-		gradW += (g @ x.T)
-		gradB += g
-	return gradW/X.shape[0] + 2*lam*W, gradB/X.shape[0]
+	gradB = np.zeros_like(b)	
+	g = -(Y.T-P)	
+	gradW += (g @ X) / N + 2*lam*W
+	gradB += g @ np.ones((N,1)) / N 
+	return gradW, gradB
 
 '''
 Gradients calculations based on given source code
@@ -112,10 +109,31 @@ def compute_gradients_num(X,Y,P,W,b,lam):
 			W[i,j] -= h
 	return grad_W, grad_b
 
-def fit(traning, validation, batch_size=100, eta=0.1, n_epocs=20, lam=0.5, shuffle=False):
-	N = traning["input"].shape[0]
+def test_grad():
+	traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
 	W = np.random.normal(0, 0.1, (10,3072))
 	b = np.random.normal(0, 0.1, (10,1)) 
+	lam = 10
+	X = traning["input"][0:100]
+	Y = traning["targets"][0:100]
+	P = EvaluateClassifier(X,W,b)
+	gradW, gradB = ComputeGradients(X,Y,P,W,b,lam)
+	numGradW, numGradB = compute_gradients_num(X,Y,P,W,b,lam)
+	print("W")
+	compare(gradW, numGradW)
+	print("B")
+	compare(gradB, numGradB)
+
+def compare(g, n):
+	print("Avg diff {}".format(np.mean(np.abs(g - n))))
+	print("Length {} {} {}".format(np.linalg.norm(g), np.linalg.norm(n), np.linalg.norm(g) - np.linalg.norm(n)))
+	print("Max {} {}".format(np.max(g), np.max(n)))
+	print("Min {} {}".format(np.min(g), np.min(n)))
+
+def fit(traning, validation, batch_size=100, eta=0.1, n_epocs=20, lam=0.5, shuffle=False):
+	N = traning["input"].shape[0]
+	W = np.random.normal(0, 0.01, (10,3072))
+	b = np.random.normal(0, 0.01, (10,1)) 
 	history = np.zeros((n_epocs,4))
 	for epoc in tqdm(range(n_epocs)):
 		if shuffle:
@@ -137,7 +155,7 @@ def fit(traning, validation, batch_size=100, eta=0.1, n_epocs=20, lam=0.5, shuff
 		history[epoc][1] = ComputeCost(validation["input"],validation["targets"],W,b,lam)
 		history[epoc][2] = ComputeAccuracy(traning["input"],traning["labels"],W,b)
 		history[epoc][3] = ComputeAccuracy(validation["input"],validation["labels"],W,b)
-		#if epoc % 4 == 0:
+		#if epoc % 5 == 0:
 		#	eta /= 10 
 	return W, b, history
 
@@ -196,5 +214,8 @@ def experiment_alldata(name="",batch_size=100, eta=0.01, n_epocs=20, lam=0, shuf
 	print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, lam))
 	print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, lam)) 
 
-experiment_alldata(name="M", batch_size=100, n_epocs=20, eta=0.01)
-#experiment(name="TestShuffle", batch_size=100, n_epocs=40, eta=1, lam=0.1)
+#test_grad()
+experiment(name="Experiment1",batch_size=100, eta=0.1, n_epocs=40, plot_graphs=True)
+experiment(name="Experiment2",batch_size=100, eta=0.01, n_epocs=40, plot_graphs=True)
+experiment(name="Experiment3",batch_size=100, eta=0.01, n_epocs=40, lam=0.1, plot_graphs=True)
+experiment(name="Experiment4",batch_size=100, eta=0.01, n_epocs=40, lam=1, plot_graphs=True)	
