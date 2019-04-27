@@ -11,26 +11,31 @@ class Layer:
         self.W = np.random.normal(0, 1/np.sqrt(units), (units,input))
         self.b = np.zeros((units, 1))
         self.learning_rate = learning_rate
-        self.P = None
+        self.H = None
+        self.S = None
         self.X = None
         self.gradW = None
         self.gradB= None
+        self.lam = lam
 
     def EvaluateLayer(self,X):
         self.X = X
-        s = self.W @ X.T + self.b 
+        self.S = self.W @ X.T + self.b 
         if self.activation == "soft_max":
-            self.P = soft_max(s)
+            self.H = soft_max(self.S)
         else:
-            self.P = relu(s)
-        return self.P
+            self.H = relu(self.S)
+        return self.H
 
     def ComputeGradients(self,Y):
         N = self.X.shape[0] 
         self.gradW = np.zeros_like(self.W)
         self.gradB = np.zeros_like(self.b)    
-        g = -(Y.T-self.P)    
-        self.gradW += (g @ X) / N + 2*self.lam*W
+        g = -(Y.T-self.H) 
+        if activation == "relu":
+            ind = np.where(self.S>0,1,0)[:,0]  
+            g = np.diag(ind) 
+        self.gradW += (g @ self.X) / N + 2*self.lam*self.W
         self.gradB += g @ np.ones((N,1)) / N 
         return self.gradW, self.gradB
 
@@ -108,8 +113,8 @@ def plot_histogram(W, file_name):
 
 def EvaluateClassifier(X,layers):
     for layer in layers:
-        X = layer.EvaluateLayer(X)
-    return X
+        X = layer.EvaluateLayer(X).T
+    return X.T
 
 def soft_max(s):
     s_exp = np.exp(s - np.max(s))
@@ -130,12 +135,29 @@ def ComputeCost(X,Y, layers):
 def ComputeAccuracy(X,y,layers):
     return np.sum(np.argmax(EvaluateClassifier(X,layers), axis=0) == y) / X.shape[0]
 
-def ComputeGradients(Y,layers):
-    for i in reversed(range(len(layers))):
-        layers[i].ComputeGradients(Y)
-        Y = np.zeros_like(layers[i].x)
-    for layer in layers:
-        layer.Update()
+def ComputeGradients(X,Y,layers):
+    N = X.shape[0]
+    layers[0].gradW = np.zeros_like(layers[0].W)
+    layers[0].gradB = np.zeros_like(layers[0].b) 
+    layers[1].gradW = np.zeros_like(layers[1].W)
+    layers[1].gradB = np.zeros_like(layers[1].b) 
+    S1 = layers[0].S
+    h = layers[0].H
+    S2 = layers[1].S
+    P = layers[1].S
+
+    g = (P - Y.T)
+    layers[1].gradB += g.sum(axis=1).reshape(g.shape[0],1)
+    layers[1].gradW += (g @ h.T) / N + 2*layers[1].lam*layers[1].W
+    g = g.T @ layers[1].W
+    ind = np.where(S1 > 0, 1, 0)[:,0]
+    g = (g @ np.diag(ind)).T
+    layers[0].gradW += g @ X
+    layers[0].gradB += g.sum(axis=1).reshape(g.shape[0],1)
+    return layers[0].gradW, layers[0].gradB, layers[1].gradW, layers[1].gradB
+
+
+
 
 def Update(layers):
     for layer in layers:
@@ -200,15 +222,15 @@ def fit(layers, traning, validation, batch_size=100, eta=0.1, n_epocs=20, lam=0.
             X = traning["input"][start:end]
             Y = traning["targets"][start:end]
             P = EvaluateClassifier(X, layers)
-            ComputeGradients(Y, layers)
+            ComputeGradients(X, Y, layers)
             Update(layers)
-        history[epoc][0] = ComputeCost(traning["input"],traning["targets"],W,b,lam)
-        history[epoc][1] = ComputeCost(validation["input"],validation["targets"],W,b,lam)
-        history[epoc][2] = ComputeAccuracy(traning["input"],traning["labels"],W,b)
-        history[epoc][3] = ComputeAccuracy(validation["input"],validation["labels"],W,b)
+        history[epoc][0] = ComputeCost(traning["input"],traning["targets"],layers)
+        history[epoc][1] = ComputeCost(validation["input"],validation["targets"],layers)
+        history[epoc][2] = ComputeAccuracy(traning["input"],traning["labels"],layers)
+        history[epoc][3] = ComputeAccuracy(validation["input"],validation["labels"],layers)
 #if epoc % 5 == 0:
         #    eta /= 10 
-    return W, b, history
+    return history
 
 def plot(series, file_name, ylabel=""):
     l = ["Train", "Validation"]
@@ -226,21 +248,22 @@ def get_lables(file):
         meta = pickle.load(f, encoding='bytes')
     return meta[b'label_names']
     
-def experiment(name="",batch_size=100, eta=0.01, n_epocs=20, lam=0, shuffle=False, plot_graphs=False):
+def experiment(name="",batch_size=100, eta=0.01, n_epocs=20, lam=0, shuffle=False, plot_graphs=True):
     traning = read_images("Datasets/cifar-10-batches-py/data_batch_1")
     validation = read_images("Datasets/cifar-10-batches-py/data_batch_2")
     test = read_images("Datasets/cifar-10-batches-py/test_batch")
     lables = get_lables("Datasets/cifar-10-batches-py/batches.meta")
-    W, b, history = fit(traning, validation, batch_size=batch_size, eta=eta, n_epocs=n_epocs, lam=lam, shuffle=shuffle)
+    layers = [Layer(input=3072, units=100, activation="relu"),Layer(input=100, units=10, activation="soft_max")]
+    history = fit(layers, traning, validation, batch_size=batch_size, eta=eta, n_epocs=n_epocs, lam=lam, shuffle=shuffle)
     if plot_graphs:
         plot([history[:,0], history[:,1]], "Cost" + name + ".png", ylabel="Cost")
         plot([history[:,2], history[:,3]], "Accuracy" + name + ".png", ylabel="Accuracy")
-        plot_weights(W, lables,"Weights" + name + ".png")
-        plot_histogram(W, "WeightsHistogram" + name + ".png")
+        #plot_weights(W, lables,"Weights" + name + ".png")
+        #plot_histogram(W, "WeightsHistogram" + name + ".png")
     print("{} batch_size={}, eta={}, n_epocs={}, lam={}, shuffle={}".format(name, batch_size, eta, n_epocs,lam, shuffle))
-    print(ComputeAccuracy(traning["input"],traning["labels"],W,b) , ComputeCost(traning["input"],traning["targets"],W,b, lam))
-    print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, lam))
-    print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, lam)) 
+    print(ComputeAccuracy(traning["input"],traning["labels"],layers) , ComputeCost(traning["input"],traning["targets"],layers))
+    print(ComputeAccuracy(validation["input"],validation["labels"],layers),ComputeCost(validation["input"],validation["targets"],layers))
+    print(ComputeAccuracy(test["input"],test["labels"],layers), ComputeCost(test["input"],test["targets"],layers)) 
 
 def experiment_alldata(name="",batch_size=100, eta=0.01, n_epocs=20, lam=0, shuffle=False, plot_graphs=False):
     data = read_all()
@@ -265,4 +288,4 @@ def experiment_alldata(name="",batch_size=100, eta=0.01, n_epocs=20, lam=0, shuf
     print(ComputeAccuracy(validation["input"],validation["labels"],W,b),ComputeCost(validation["input"],validation["targets"],W,b, lam))
     print(ComputeAccuracy(test["input"],test["labels"],W,b), ComputeCost(test["input"],test["targets"],W,b, lam)) 
 
-test_grad()
+experiment()
