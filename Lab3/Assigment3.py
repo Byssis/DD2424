@@ -23,8 +23,8 @@ class Layer:
         self.gradBeta= 0
         self.lam = lam
         self.batch_norm = batch_norm
-        self.mu = []
-        self.muGlobal = []
+        self.mu = None
+        self.muGlobal = None
         self.var = False
         self.alpha = alpha
 
@@ -34,8 +34,12 @@ class Layer:
         self.S += (self.W @ X.T + self.b).T 
         sPrime = np.zeros_like(self.S)
         if self.batch_norm:
-            self.mu = np.mean(self.S, axis=0)
-            self.var = np.var(self.S, axis=0)
+            if traning:
+                self.mu = np.mean(self.S, axis=0)
+                self.var = np.var(self.S, axis=0)
+            else:
+                self.mu = self.muGlobal
+                self.var = self.varGlobal
             self.Shat = BatchNormalize(self.S, self.mu, self.var)
             sPrime += self.Gamma.T * self.Shat + self.Beta.T 
         else:
@@ -46,19 +50,6 @@ class Layer:
         else:
             self.H = relu(sPrime.T).T
         return self.H
-
-    def ComputeGradients(self,g):
-        N = self.X.shape[0] 
-        self.gradW = np.zeros_like(self.W)
-        self.gradB = np.zeros_like(self.b)    
-       
-        if self.activation == "relu":
-            ind = np.where(self.S>0,1,0)[:,0]  
-            g = np.diag(ind) 
-
-        self.gradW += (g @ self.X) / N + 2*self.lam*self.W
-        self.gradB += g @ np.ones((N,1)) / N 
-        return self.gradW, self.gradB
 
     def BatchNormBackPass(self, g):
         N = g.shape[1]
@@ -89,6 +80,13 @@ class Layer:
         if self.batch_norm:
             self.Gamma -= learning_rate * self.gradGamma
             self.Beta -= learning_rate * self.gradBeta
+
+        if self.muGlobal is None:
+            self.muGlobal = self.mu
+            self.varGlobal = self.var
+        else:
+            self.muGlobal = self.alpha * self.muGlobal + (1-self.alpha) * self.mu
+            self.varGlobal = self.alpha * self.varGlobal + (1-self.alpha) * self.var
 
 def BatchNormalize(S, mu, var):
     return ((var + np.finfo(float).eps)**-0.5)*(S-mu)
@@ -134,35 +132,43 @@ def normalize(data, meanX, stdX):
     data /= stdX
     return data
 
-def display_image(image):
-    red = np.reshape(image[0:1024],(32,32))
-    green = np.reshape(image[1024:2048],(32,32))
-    blue =  np.reshape(image[2048:3072],(32,32))
-    plt.imshow(np.dstack((red, green, blue)))
-    plt.show()
-
-def plot_weights(W, labels, file_name):
-    for i, row in enumerate(W):
-        img = (row - row.min()) / (row.max() - row.min())
-        plt.subplot(2, 5, i+1)
-        resize_image = np.reshape(img, (32, 32, 3), order='F')
-        rot_imag = np.rot90(resize_image, k=3)
-        plt.imshow(rot_imag, interpolation="gaussian")
-        plt.axis('off')
-        plt.title(labels[i].decode("utf-8"))
-    plt.savefig('Result_Pics/' + file_name) # save the figure to file
-    plt.close() 
-
-def plot_histogram(W, file_name):
-    histogram = W.flatten()
-    plt.hist(histogram, bins='auto', color='b', alpha=0.7, rwidth=0.85)
-    plt.savefig('Result_Pics/' + file_name) # save the figure to file
-    plt.close() 
-
 def EvaluateClassifier(X,layers, traning=False):
     for layer in layers:
         X = layer.EvaluateLayer(X, traning=traning)
     return X
+
+def Update(layers, eta):
+    for layer in layers:
+        layer.Update(eta)
+
+
+def ComputeGradientsV2(X,Y,layers):
+    N = X.shape[0]
+    layers[0].gradW = np.zeros_like(layers[0].W)
+    layers[0].gradB = np.zeros_like(layers[0].b) 
+
+    P = layers[-1].H
+    g = (P - Y).T
+    for i in reversed(range(1,len(layers))):
+        layers[i].gradW = np.zeros_like(layers[i].W)
+        layers[i].gradB = np.zeros_like(layers[i].b) 
+        if layers[i].batch_norm == True:
+            g = layers[i].BatchNormBackPass(g)
+      
+        layers[i].gradW += (g @ layers[i].X) / N 
+        layers[i].gradW += 2 * layers[i].lam * layers[i].W 
+        layers[i].gradB += g @ np.ones((N,1)) / N  
+        g = g.T @ layers[i].W 
+        ind = np.where(layers[i].X > 0, 1, 0)
+        g = (g.T * ind.T)
+   
+    if layers[0].batch_norm == True:
+        g = layers[0].BatchNormBackPass(g)
+      
+    layers[0].gradW += (g @ X) / N 
+    layers[0].gradW += 2 * layers[0].lam * layers[0].W 
+    layers[0].gradB += g @ np.ones((N,1)) / N  
+    return layers
 
 def summary(layers):
     sum = 0
@@ -188,41 +194,6 @@ def ComputeCost(X,Y, layers):
 
 def ComputeAccuracy(X,y,layers):
     return np.sum(np.argmax(EvaluateClassifier(X,layers), axis=1) == y) / X.shape[0]
-
-
-def ComputeGradientsV2(X,Y,layers):
-    N = X.shape[0]
-    layers[0].gradW = np.zeros_like(layers[0].W)
-    layers[0].gradB = np.zeros_like(layers[0].b) 
-
-    P = layers[-1].H
-    g = (P - Y).T
-    for i in reversed(range(1,len(layers))):
-        layers[i].gradW = np.zeros_like(layers[i].W)
-        layers[i].gradB = np.zeros_like(layers[i].b) 
-        layers[i].gradGamma = 0
-        layers[i].gradBeta = 0
-        if layers[i].batch_norm == True:
-            g = layers[i].BatchNormBackPass(g)
-      
-        layers[i].gradW += (g @ layers[i].X) / N 
-        layers[i].gradW += 2 * layers[i].lam * layers[i].W 
-        layers[i].gradB += g @ np.ones((N,1)) / N  
-        g = g.T @ layers[i].W 
-        ind = np.where(layers[i].X > 0, 1, 0)
-        g = (g.T * ind.T)
-   
-    if layers[0].batch_norm == True:
-        g = layers[0].BatchNormBackPass(g)
-      
-    layers[0].gradW += (g @ X) / N 
-    layers[0].gradW += 2 * layers[0].lam * layers[0].W 
-    layers[0].gradB += g @ np.ones((N,1)) / N  
-    return layers
-
-def Update(layers, eta):
-    for layer in layers:
-        layer.Update(eta)
 
 def cyclic_learning_rate(eta_min, eta_max, n_s, t):
     l = t % (n_s * 2)
@@ -341,14 +312,19 @@ def experiment_alldata(name="",batch_size=100, eta=0.01, n_epocs=20, lam=0, shuf
     test["input"] = normalize(test["input"], mean, std)
 
     if n_s == None:
-        n_s = 2 * len(traning["input"])// batch_size
-    print(n_s)
-    # Define model and fit it
+        n_s = 2 * len(traning["input"]) // batch_size
+    
+    # Define model 
     layers = [
         Layer(input=3072, units=50, activation="relu", lam=lam, batch_norm=batch_norm),
         Layer(input=50, units=50, activation="relu", lam=lam, batch_norm=batch_norm),
         Layer(input=50, units=10, activation="soft_max", lam=lam),
     ]
+
+    best_lam = parameter_search(traning, validation, layers, batch_size=batch_size)
+    print("best lamda: ",best_lam)
+    for layer in layers:
+        layer.lam = best_lam
   
     print("# parameters: ",  summary(layers))
     history = fit(layers, traning, validation, batch_size=batch_size, n_epocs=n_epocs, lam=lam, shuffle=shuffle, eta_min=eta_min, eta_max=eta_max, n_s=n_s)
@@ -372,18 +348,18 @@ def test_eta():
     plt.plot(list(range(2*n_s)), eta)
     plt.show()
 
-def parameter_search(traning, validation, layers, batch_size=100, lmin=-5, lmax=-1, cycles=2, search_rounds=5):
+def parameter_search(traning, validation, layers, batch_size=100, lmin=-5, lmax=-1, cycles=2, search_rounds=3):
     best = 0
     best_lam = 0
     for s in range(search_rounds):
         print("Round ", s + 1, lmin, lmax)
-        candidates = [lmin + (lmax-lmin)*np.random.random() for i in range(20)]
+        candidates = [lmin + (lmax-lmin) * np.random.random() for i in range(20)]
         n_s = 2 * traning["input"].shape[0] // batch_size
         for candidate in candidates:
             network = []
             lam = 10 ** candidate
             for layer in layers:
-                l = Layer(input=layer.input, units=layer.units, lam=lam, activation=layer.activation)
+                l = Layer(input=layer.input, units=layer.units, lam=lam, activation=layer.activation, batch_norm=layer.batch_norm)
                 network.append(l)
             _history = fit(network, traning, validation, batch_size=batch_size, n_epocs=cycles, lam=lam)
             acc = ComputeAccuracy(validation["input"],validation["labels"],network)
@@ -399,6 +375,4 @@ def parameter_search(traning, validation, layers, batch_size=100, lmin=-5, lmax=
     return best_lam
     
  
-experiment_alldata(name='9LayerBatch',n_epocs=20, lam=0.005, batch_size=100, eta_min=1e-5, eta_max=1e-1, shuffle=True, batch_norm=True)
-#experiment(name='Figure4',n_epocs=48, lam=0.01, batch_size=100, eta_min=1e-5, eta_max=1e-1, n_s=800)
-#experiment(name='Test1',n_epocs=48, lam=0.01, batch_size=100, eta_min=1e-5, eta_max=1e-1, n_s=200)
+experiment_alldata(name='9LayerBatch',n_epocs=20, lam=4.593889126891997e-05, batch_size=100, eta_min=1e-5, eta_max=1e-1, shuffle=True, batch_norm=True)
