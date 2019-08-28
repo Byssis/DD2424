@@ -2,7 +2,7 @@ import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 class RNN():
-    def __init__(self, M=100, K=28, eta=0.01, seq_len=25, sigma=0.1):
+    def __init__(self, M=100, K=28, eta=0.01, seq_len=25, sigma=0.01):
         self.b = np.zeros((M, 1))
         self.c = np.zeros((K, 1))
         self.U = np.random.random((M, K)) * sigma
@@ -87,6 +87,7 @@ class RNN():
             yield choice
             x = np.zeros_like(self.c)
             x[choice] = 1
+            h = h[x.shape[1] - 1]
 
     def loss(self, X, Y, h_start):
         l_cross = (Y * self.evaluate(X, h_start)[0]).sum(axis=0)
@@ -173,16 +174,17 @@ def train(data):
             smooth_loss = 0.999 * smooth_loss + 0.001 * loss
             losses.append(smooth_loss)
             updates += 1
-            if updates % 500 == 0:
+            if updates % 10000 == 0:
                 print(i,updates, end='\t')
                 print(smooth_loss, end='\t')
                 for char in rnn.synthesize(char_to_index[X[batch]], n = 200, h=h_prev):
                     print(index_to_char[char], end='')
                 print()
+            h = h[x.shape[1] - 1]
     plt.plot(list(range(len(losses))), losses)
     plt.show()
     print("Final result")
-    for char in rnn.synthesize(char_to_index[X[0]], n = 1000):
+    for char in rnn.synthesize(char_to_index[X[0]], n = 1000, h=np.zeros_like(rnn.b)):
         print(index_to_char[char], end='')
 
 data = read_file("goblet_book.txt")            
