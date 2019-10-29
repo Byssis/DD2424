@@ -1,8 +1,9 @@
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import time
 class RNN():
-    def __init__(self, M=100, K=28, eta=0.01, seq_len=25, sigma=0.01):
+    def __init__(self, M=100, K=28, eta=0.1, seq_len=25, sigma=0.01):
         self.b = np.zeros((M, 1))
         self.c = np.zeros((K, 1))
         self.U = np.random.random((M, K)) * sigma
@@ -22,22 +23,21 @@ class RNN():
         ht = {}
         ht[-1] = np.copy(h)
         for i in range(X.shape[1]):
-            x = X[:, i:i+1]
+            x = X[:, i].reshape((X.shape[0], 1))
             a = self.W @ ht[i-1] + self.U @ x + self.b
-            ht[i] = np.zeros_like(a)
-            np.tanh(a, out=ht[i])
+            ht[i] = np.tanh(a)
             o = self.V @ ht[i] + self.c
             p = soft_max(o)
-            out[:, i:i+1] = p
+            out[:, i] = p.reshape(-1)
         return out, ht
 
     def backwards_pass(self, X, Y, P, h):
         self.grads.reset()
         dh_next = np.zeros_like((self.b))
         for t in reversed(range(X.shape[1])):
-            x = X[:, t:t+1]
+            x = X[:, t].reshape((X.shape[0], 1))
 
-            g = -(Y[:, t:t+1] - P[:, t:t+1])
+            g = -(Y[:, t] - P[:, t]).reshape((Y.shape[0], 1))
             self.grads.V += g @ h[t].T
             self.grads.c += g
 
@@ -53,6 +53,8 @@ class RNN():
 
             # update delta_h
             dh_next = self.W.T @ delta_h
+
+        # Clip
         self.grads.W = np.clip(self.grads.W, -5, 5)
         self.grads.V = np.clip(self.grads.V, -5, 5)
         self.grads.U = np.clip(self.grads.U, -5, 5)
@@ -83,11 +85,12 @@ class RNN():
         x[start_char_index] = 1
         for i in range(n):
             p, h = self.evaluate(x, h)
+            #print(h.keys())
             choice = sample(p[:,0])
             yield choice
             x = np.zeros_like(self.c)
             x[choice] = 1
-            h = h[x.shape[1] - 1]
+            h = h[0]
 
     def loss(self, X, Y, h_start):
         l_cross = (Y * self.evaluate(X, h_start)[0]).sum(axis=0)
@@ -95,14 +98,14 @@ class RNN():
         return np.sum(-np.log(l_cross))
 
     def train(self, X, Y, h_start):
-
+        start = time.time()
         p, h_new= self.evaluate(X, h_start)
-
         h = self.backwards_pass(X, Y, p, h_new)
-
         self.h = h
 
         self.adagradUpdate()
+        end = time.time()
+        #print(end - start)
 
         return self.loss(X,Y, h_start), h_new
 
@@ -164,22 +167,30 @@ def train(data):
     updates = 0
     losses = []
     smooth_loss = - np.log(1.0/len(char_to_index.keys()))*25
-    for i in range(2):
+    print(len(X))
+    time_c = 0
+    for i in range(3):
         h = np.zeros_like(rnn.b)
-        for batch in range(0, len(X), 25):
+        
+        for batch in tqdm(range(0, len(X), 25)):
+            start = time.time()
             h_prev = h
             x = to_matrix(X[batch:batch+25], char_to_index)
             y = to_matrix(Y[batch:batch+25], char_to_index)
             loss, h = rnn.train(x,y,h)
+            end = time.time()
             smooth_loss = 0.999 * smooth_loss + 0.001 * loss
             losses.append(smooth_loss)
-            updates += 1
+            time_c += end - start
             if updates % 10000 == 0:
                 print(i,updates, end='\t')
                 print(smooth_loss, end='\t')
                 for char in rnn.synthesize(char_to_index[X[batch]], n = 200, h=h_prev):
                     print(index_to_char[char], end='')
                 print()
+                print((time_c) / 10000, 'ms')
+                time_c = 0
+            updates += 1
             h = h[x.shape[1] - 1]
     plt.plot(list(range(len(losses))), losses)
     plt.show()
